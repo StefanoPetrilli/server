@@ -46,6 +46,9 @@ static mysql_mutex_t LOCK_uuid_v7_generator;
 #define UUID_VARIANT                         0x8000000000000000
 #define UUID_VARIANT_MASK                    0x3FFFFFFFFFFFFFFF
 #define MICROSECONDS_TO_12BIT_MAPPING_FACTOR 4.096
+#define RATE_LIMIT                           500000
+#define SLEEP_MICROSECONDS                   250000
+#define SLEEP_MILLISECONDS                   250
 
 /**
   Init structures needed for my_uuid_v7
@@ -109,6 +112,20 @@ void my_uuid_v7(uchar *to)
     */
     borrowed_microseconds += uuid_time - tv + 1;
     tv = uuid_time + 1;
+
+    if (borrowed_microseconds > RATE_LIMIT)
+    {
+      /* We are building up too much borrowed time, >500 milliseconds.
+         The output could become non-time-sortable if the server
+         process restarts, causing `borrowed_microseconds` to reset to 0.
+
+         Sleep until we have HALF of that maximum debt,
+         in order to avoid repeatedly blocking and sleeping
+         on successive calls.
+      */
+      my_sleep(SLEEP_MILLISECONDS);
+      borrowed_microseconds -= SLEEP_MICROSECONDS;
+    }
   }
 
   uuid_time= tv;
