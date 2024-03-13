@@ -34,6 +34,7 @@
 #include <my_rnd.h>
 #include <m_string.h>
 #include <myisampack.h> /* mi_int2store, mi_int4store */
+#include <errmsg.h>
 
 static my_bool my_uuid_v7_inited= 0;
 static uint64 borrowed_microseconds;
@@ -46,8 +47,7 @@ static mysql_mutex_t LOCK_uuid_v7_generator;
 #define UUID_VARIANT                         0x8000000000000000
 #define UUID_VARIANT_MASK                    0x3FFFFFFFFFFFFFFF
 #define MICROSECONDS_TO_12BIT_MAPPING_FACTOR 4.096
-#define RATE_LIMIT                           500000
-#define SLEEP_MICROSECONDS                   250000
+#define MAX_BORROWED_MICROSECONDS            500000
 #define SLEEP_MILLISECONDS                   250
 
 /**
@@ -110,10 +110,10 @@ void my_uuid_v7(uchar *to)
       may end up > next_timestamp; this is OK. Nonetheless, we'll
       try to unwind microseconds when we get a chance to.
     */
-    borrowed_microseconds += uuid_time - tv + 1;
+    borrowed_microseconds+= uuid_time - tv + 1;
     tv = uuid_time + 1;
 
-    if (borrowed_microseconds > RATE_LIMIT)
+    if (borrowed_microseconds > MAX_BORROWED_MICROSECONDS)
     {
       /* We are building up too much borrowed time, >500 milliseconds.
          The output could become non-time-sortable if the server
@@ -124,14 +124,19 @@ void my_uuid_v7(uchar *to)
          on successive calls.
       */
       my_sleep(SLEEP_MILLISECONDS);
-      borrowed_microseconds -= SLEEP_MICROSECONDS;
+      borrowed_microseconds-= MAX_BORROWED_MICROSECONDS / 2;
     }
   }
 
   uuid_time= tv;
   mysql_mutex_unlock(&LOCK_uuid_v7_generator);
 
-  my_random_bytes((unsigned char *)&rand, (int) sizeof(rand));
+  if (my_random_bytes((unsigned char *)&rand, (int) sizeof(rand)) != MY_AES_OK)
+  {
+    my_printf_error(CR_UNKNOWN_ERROR,
+                "Failed to generate the random section of UUIDv7\n",
+                MYF(ME_FATAL|ME_ERROR_LOG));
+  }
 
   unix_ts_ms=  (uint64) ((tv / 1000) & 0xFFFFFFFFFFFF);
   /**
@@ -139,12 +144,14 @@ void my_uuid_v7(uchar *to)
    values that can be represented in 12 bits (from 0 to 4095) as
    described in section 6.2, Method 3.
   */
-  sub_ms_precision= MICROSECONDS_TO_12BIT_MAPPING_FACTOR * (tv % 1000);
+  sub_ms_precision= (uint16)
+    (MICROSECONDS_TO_12BIT_MAPPING_FACTOR * (tv % 1000));
   /**
    Clear bits 48-51 and 64-65 to 0 and then set them to the
    value specified by the UUIDv7 specification.
   */
-  version_and_sub_ms_precision= (uint16) ((sub_ms_precision & UUID_VERSION_MASK) | UUID_VERSION);
+  version_and_sub_ms_precision= (uint16)
+    ((sub_ms_precision & UUID_VERSION_MASK) | UUID_VERSION);
   variant_and_rand= (uint64) ((rand & UUID_VARIANT_MASK) | UUID_VARIANT);
 
   mi_int6store(to, unix_ts_ms);
