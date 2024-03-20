@@ -1061,6 +1061,10 @@ void my_uuid_init(ulong seed1, ulong seed2);
 void my_uuid(uchar *guid);
 void my_uuid_end(void);
 
+void my_uuid_v4_init();
+void my_uuid_v4(uchar *guid);
+void my_uuid_v4_end(void);
+
 void my_uuid_v7_init();
 void my_uuid_v7(uchar *guid);
 void my_uuid_v7_end(void);

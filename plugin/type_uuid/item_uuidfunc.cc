@@ -45,6 +45,33 @@ bool Item_func_uuid::val_native(THD *, Native *to)
   return 0;
 }
 
+const Type_handler *Item_func_uuid_v4::type_handler() const
+{
+  return Type_handler_uuid_new::singleton();
+}
+
+String *Item_func_uuid_v4::val_str(String *str)
+{
+  DBUG_ASSERT(fixed());
+  str->alloc(uuid_len()+1);
+  str->length(uuid_len());
+  str->set_charset(collation.collation);
+
+  uchar buf[MY_UUID_SIZE];
+  my_uuid_v4(buf);
+  my_uuid2str(buf, const_cast<char*>(str->ptr()), 1);
+  return str;
+}
+
+bool Item_func_uuid_v4::val_native(THD *, Native *to)
+{
+  DBUG_ASSERT(fixed());
+  to->alloc(MY_UUID_SIZE);
+  to->length(MY_UUID_SIZE);
+  my_uuid_v4((uchar*)to->ptr());
+  return 0;
+}
+
 const Type_handler *Item_func_uuid_v7::type_handler() const
 {
   return Type_handler_uuid_new::singleton();
